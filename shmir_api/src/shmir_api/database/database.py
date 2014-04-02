@@ -1,7 +1,7 @@
 """
 Module for communication with database
 """
-
+import re
 from flask import g
 
 from sqlsoup import SQLSoup
@@ -85,3 +85,59 @@ def immuno_get_all():
     """
     db = get_db()
     return serialized_all_by_query(db.immuno)
+
+
+def create_regular(seq):
+    """Function for generating regular expresions for given miRNA sequence
+    according to the schema below:
+
+    example miRNA sequence: UGUAAACAUCCUCGACUGGAAG
+    U... (weight 1): the first nucleotide
+    U...G (weight 2): the first and the last nucleotides
+    UG... (weight 2): two first nucleotides
+    UG...G (weight 3): two first and the last nucleotides
+    UG...AG (weight 4): two first and two last nucleotides
+    """
+    seq = seq.upper()
+    acids = '[UTGCA]' # order is important: U should always be next to T
+    generic = r'{1}{2}[UTGCA]{{{0}}}{3}{4}'
+    begin = [
+        {
+            'acid': re.sub('[UT]', '[UT]', letter),
+            'excluded': acids.replace('UT' if letter in 'UT' else letter, '')
+        }
+        for letter in seq[:2]]
+
+    end = [
+        {
+            'acid': re.sub('[UT]', '[UT]', letter),
+            'excluded': acids.replace('UT' if letter in 'UT' else letter, '')
+        }
+        for letter in seq[-2:]]
+
+    regexp1 = [generic.format(i, begin[0]['acid'], begin[1]['excluded'],
+                              end[0]['excluded'], end[1]['excluded'])
+               for i in range(15, 18)]
+
+    regexp2 = [generic.format(i, begin[0]['acid'], begin[1]['excluded'],
+                              end[0]['excluded'], end[1]['acid'])
+               for i in range(15, 18)]
+
+    regexp2_ = [generic.format(i, begin[0]['acid'], begin[1]['acid'],
+                               end[0]['excluded'], end[1]['excluded'])
+                for i in range(15, 18)]
+
+    regexp3 = [generic.format(i, begin[0]['acid'], begin[1]['acid'],
+                              end[0]['excluded'], end[1]['acid'])
+               for i in range(15, 18)]
+
+    regexp4 = [generic.format(i, begin[0]['acid'], begin[1]['acid'],
+                              end[0]['acid'], end[1]['acid'])
+               for i in range(15, 18)]
+
+    return {
+        1: regexp1,
+        2: regexp2 + regexp2_,
+        3: regexp3,
+        4: regexp4,
+        }
