@@ -2,8 +2,9 @@
 Module for communication with database
 """
 import re
-from flask import g
+import json
 
+from flask import g
 from sqlsoup import SQLSoup
 from sqlalchemy import func
 from shmir_api.settings import DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT
@@ -87,7 +88,37 @@ def immuno_get_all():
     return serialized_all_by_query(db.immuno)
 
 
-def create_regular(seq):
+def get_or_create_regexp(name):
+    """
+    Function for getting regexps from database by given miR name.
+    If they do not exists, function creates regexps based on active_strand
+    and saves it to database.
+
+    active_strand: if is equal to 3, function use miRNA_a;
+                   if is equal to 1 or 5, function use miRNA_s
+                   if is equal to 0, function use both
+    """
+    backbone = backbone_get_by_name(name)
+    regexp = backbone.get('regexp')
+
+    if regexp:
+        return json.loads(regexp)
+
+    active_strand = backbone.get('active_strand')
+    seq_list = []
+
+    if active_strand in (0, 3):
+        seq_list.append(backbone.get('miRNA_a'))
+
+    if active_strand in (0, 1, 5):
+        seq_list.append(backbone.get('miRNA_s'))
+
+    regexp = create_regexp(seq_list)
+    # TODO: zapisanie do bazy
+    return regexp
+
+
+def create_regexp(seq_list):
     """Function for generating regular expresions for given miRNA sequence
     according to the schema below:
 
@@ -98,46 +129,45 @@ def create_regular(seq):
     UG...G (weight 3): two first and the last nucleotides
     UG...AG (weight 4): two first and two last nucleotides
     """
-    seq = seq.upper()
-    acids = '[UTGCA]' # order is important: U should always be next to T
+
+    acids = '[UTGCA]'  # order is important: U should always be next to T
     generic = r'{1}{2}[UTGCA]{{{0}}}{3}{4}'
-    begin = [
-        {
-            'acid': re.sub('[UT]', '[UT]', letter),
-            'excluded': acids.replace('UT' if letter in 'UT' else letter, '')
-        }
-        for letter in seq[:2]]
 
-    end = [
-        {
-            'acid': re.sub('[UT]', '[UT]', letter),
-            'excluded': acids.replace('UT' if letter in 'UT' else letter, '')
-        }
-        for letter in seq[-2:]]
+    ret = {i: [] for i in range(1, 5)}
+    for seq_ in seq_list[:]:
+        seq = seq_.upper()
+        begin = [
+            {
+                'acid': re.sub('[UT]', '[UT]', letter),
+                'excluded': acids.replace('UT' if letter in 'UT' else letter, '')
+            }
+            for letter in seq[:2]]
 
-    regexp1 = [generic.format(i, begin[0]['acid'], begin[1]['excluded'],
-                              end[0]['excluded'], end[1]['excluded'])
-               for i in range(15, 18)]
+        end = [
+            {
+                'acid': re.sub('[UT]', '[UT]', letter),
+                'excluded': acids.replace('UT' if letter in 'UT' else letter, '')
+            }
+            for letter in seq[-2:]]
 
-    regexp2 = [generic.format(i, begin[0]['acid'], begin[1]['excluded'],
-                              end[0]['excluded'], end[1]['acid'])
-               for i in range(15, 18)]
+        ret[1].extend([generic.format(i, begin[0]['acid'], begin[1]['excluded'],
+                                      end[0]['excluded'], end[1]['excluded'])
+                       for i in range(15, 18)])
 
-    regexp2_ = [generic.format(i, begin[0]['acid'], begin[1]['acid'],
-                               end[0]['excluded'], end[1]['excluded'])
-                for i in range(15, 18)]
+        ret[2].extend([generic.format(i, begin[0]['acid'], begin[1]['excluded'],
+                                      end[0]['excluded'], end[1]['acid'])
+                       for i in range(15, 18)])
 
-    regexp3 = [generic.format(i, begin[0]['acid'], begin[1]['acid'],
-                              end[0]['excluded'], end[1]['acid'])
-               for i in range(15, 18)]
+        ret[2].extend([generic.format(i, begin[0]['acid'], begin[1]['acid'],
+                                      end[0]['excluded'], end[1]['excluded'])
+                       for i in range(15, 18)])
 
-    regexp4 = [generic.format(i, begin[0]['acid'], begin[1]['acid'],
-                              end[0]['acid'], end[1]['acid'])
-               for i in range(15, 18)]
+        ret[3].extend([generic.format(i, begin[0]['acid'], begin[1]['acid'],
+                                      end[0]['excluded'], end[1]['acid'])
+                       for i in range(15, 18)])
 
-    return {
-        1: regexp1,
-        2: regexp2 + regexp2_,
-        3: regexp3,
-        4: regexp4,
-        }
+        ret[4].extend([generic.format(i, begin[0]['acid'], begin[1]['acid'],
+                                      end[0]['acid'], end[1]['acid'])
+                       for i in range(15, 18)])
+
+    return ret
