@@ -114,7 +114,9 @@ def get_or_create_regexp(name):
         seq_list.append(backbone.get('miRNA_s'))
 
     regexp = create_regexp(seq_list)
-    # TODO: zapisanie do bazy
+    db = get_db()
+    db.backbone.insert(regexp=json.dumps(regexp))
+    db.commit()
     return regexp
 
 
